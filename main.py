@@ -49,8 +49,7 @@ print(args)
 def round3(x):
     return round(x,3)
 
-if __name__ == '__main__':
-
+def main():
     # print date
     # datetime object containing current date and time
     now = datetime.now()
@@ -90,7 +89,9 @@ if __name__ == '__main__':
         args.D_in = trainloader.dataset.X.shape[1]
     else:
         assert False
-     
+    
+    import time
+    tic = time.time()
     # model
     Fmodel = args.model_fn(args).to(args.device)
     Gmodel = args.model_fn(args).to(args.device)
@@ -170,9 +171,10 @@ if __name__ == '__main__':
             Gmodel = Gsaver.load_best().to(args.device)
             Fmodel.eval()
             Gmodel.eval()
+
             ret = util.eval_nll(loaders,Fmodel,Gmodel,args)
         else:
-            ret,bestF,bestG = util.eval_game(loaders,args)
+            ret,bestF,bestG = util.eval_game(loaders,args, tic)
             metrics['bestF']=bestF
             metrics['bestG']=bestG
         metrics['best_val'] = ret
@@ -183,3 +185,6 @@ if __name__ == '__main__':
     with open(metric_save_path, 'wb') as handle:
         pickle.dump(metrics, handle, protocol=pickle.HIGHEST_PROTOCOL)
     
+
+if __name__ == '__main__':
+    main()

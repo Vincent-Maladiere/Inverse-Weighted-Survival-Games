@@ -131,11 +131,12 @@ def game(fn, phase, loader, Fmodel, Gmodel, args, Foptimizer=None, Goptimizer=No
 def cond_bs_game(fn, phase, loader, Fmodel, Gmodel, args, Foptimizer=None, Goptimizer=None, mode='normal'):
     Fsumm = 0.0
     Gsumm = 0.0
+
     for k in range(args.K-1):
         floss_meter_k = Meter()
         gloss_meter_k = Meter()
         for batch_idx, batch in enumerate(loader):     
-            (U,Delta,X) = batch
+            (U,_,Delta,X) = batch
             U=U.to(args.device)
             Delta=Delta.to(args.device)
             X=X.to(args.device)  
@@ -162,6 +163,7 @@ def cond_bs_game(fn, phase, loader, Fmodel, Gmodel, args, Foptimizer=None, Gopti
                 gloss_k = torch.tensor([-1.0]).to(args.device)
             else:
                 assert False
+
             if phase=='train':
                 floss_k.backward()
                 Foptimizer.step()
@@ -218,7 +220,7 @@ def eval_next_dist(cur_F_file, cur_G_file,args, get_F,loader,fn):
     if get_F:
         print("Searching for a new F")
         for candidate_model_filename in F_filenames:
-            print("--- Trying: {}".format(candidate_model_filename))
+            #print("--- Trying: {}".format(candidate_model_filename))
             candidate_model = get_model_from_file(candidate_model_filename,args)
             floss,_ = game(fn,'valid',loader,candidate_model,cur_G,args)
             if floss < best_metric:
@@ -234,7 +236,7 @@ def eval_next_dist(cur_F_file, cur_G_file,args, get_F,loader,fn):
     else:
         print("Searching for a new G")
         for candidate_model_filename in G_filenames:
-            print("--- Trying: {}".format(candidate_model_filename))
+            #print("--- Trying: {}".format(candidate_model_filename))
             candidate_model = get_model_from_file(candidate_model_filename,args)
             _,gloss = game(fn,'valid',loader,cur_F,candidate_model,args)
             if gloss < best_metric:
@@ -271,6 +273,26 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
     fnll,_ = _nll.nll_FG('test',testloader,Fmodel,Gmodel,args)         
     fconc,_ = _concordance.test_concordance_FG(testloader,testloader,Fmodel,Gmodel,args)
     
+    y_train, y_test, y_pred, time_grid = get_targets(trainloader, testloader, Fmodel, args)
+
+    yana_loss = get_yana_loss(
+        pred=y_pred,
+        duration=y_test["duration"],
+        event=y_test["event"],
+        time_grid=time_grid,
+    )
+
+    from hazardous.metrics._brier_score import integrated_brier_score_incidence
+    hazardous_ibs = integrated_brier_score_incidence(
+        y_train,
+        y_test,
+        y_pred,
+        times=time_grid,
+        event_of_interest="any",
+    )
+
+    c_indexes = get_c_index(y_train, y_test, y_pred, time_grid)
+
     if args.dataset in ['gamma','mnist']:
         assert torch.all(torch.eq(Ftestloader.dataset.Delta,1))
         fbs_uncensored,_ = game('bs_game','test',Ftestloader,Fmodel,Gmodel,args,mode='uncensored')
@@ -289,13 +311,20 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
     metrics['fbll_ipcw']=round3(fbll_ipcw)  
     metrics['fbs_uncensored']=round3(fbs_uncensored)
     metrics['fbll_uncensored']=round3(fbll_uncensored)
+    metrics["yana_loss"] = yana_loss
+    metrics["hazardous_ibs"] = hazardous_ibs
+    metrics["c_indexes"] = c_indexes
+
+    print(metrics)
+    import ipdb; ipdb.set_trace()    
+
     return metrics
 
 
 def eval_nll(loaders,Fmodel,Gmodel,args):
     return f_metrics(loaders,Fmodel,Gmodel,args)
 
-def eval_game(loaders,args):
+def eval_game(loaders,args, tic):
 
     if args.dataset in ['gamma','mnist']:
         trainloader,valloader,testloader,Ftestloader,Gtestloader = loaders
@@ -316,6 +345,117 @@ def eval_game(loaders,args):
    
     best_F = get_model_from_file(cur_F_file,args)
     best_G = get_model_from_file(cur_G_file,args)
+    import time
+    toc = time.time()
+    print(f"time to train: {toc - tic:.2f} seconds")
+    return
     return f_metrics(loaders,best_F,best_G,args), cur_F_file,cur_G_file
 
 
+def get_bin_boundaries(times, K):
+    percents = np.arange(K) * 100. / K
+    return np.percentile(times, percents)
+    
+
+def get_targets(trainloader, testloader, model, args):
+    all_y_proba = []
+    all_discrete_duration = []
+    all_duration = []
+    all_event = []
+    for (U, cU, Delta, X) in testloader:
+        y_proba = model(X)
+        all_y_proba.append(y_proba)
+        all_discrete_duration.append(U)
+        all_duration.append(
+            cU.detach().numpy()
+        )
+        all_event.append(
+            Delta.detach().numpy()
+        )
+
+    all_discrete_duration = torch.tensor(np.hstack(all_discrete_duration))
+    all_duration = np.hstack(all_duration)
+    all_event = np.hstack(all_event)
+
+    all_y_proba = torch.tensor(np.concatenate(all_y_proba, axis=0))
+    risk = catdist.CatDist(all_y_proba, args).probs.cumsum(-1)
+    risk = risk.detach().numpy()
+
+    # import torch.nn.functional as F
+    # hazard = F.softplus(all_y_proba)
+    # hazard = hazard.detach().numpy()
+    # surv = np.exp(-hazard.cumsum(axis=1))
+    # risk = 1 - surv
+
+    import pandas as pd
+    y_test = pd.DataFrame(
+        dict(
+            event=all_event,
+            duration=all_duration,
+        )
+    )
+
+    all_duration = []
+    all_event = [] 
+    for (_, cU, Delta, _) in trainloader:
+        all_duration.append(cU)
+        all_event.append(Delta)
+    all_duration = np.hstack(all_duration)
+    all_event = np.hstack(all_event)
+
+    y_train = pd.DataFrame(
+        dict(
+            event=all_event,
+            duration=all_duration,
+        )
+    )
+
+    time_grid = get_bin_boundaries(all_duration[all_event], args.K)
+
+    return y_train, y_test, risk, time_grid
+
+
+def get_yana_loss(pred, duration, event, time_grid, epsilon=1e-5):
+    loss = 0
+    for idx_time in range(len(time_grid) - 1):
+        lower_time = time_grid[idx_time]
+        upper_time = time_grid[idx_time + 1]
+        mask = (lower_time < duration) & (duration <= upper_time)
+        mask = mask.values
+        f = pred[:, idx_time + 1] - pred[:, idx_time]
+        loss -= (event * np.log(f + epsilon))[mask].sum()
+        loss -= ((1 - event) * np.log(1 - pred[:, idx_time + 1] + epsilon))[
+            mask
+        ].sum()
+    return loss / pred.shape[0]
+
+
+def make_recarray(y):
+    event = y["event"]
+    duration = y["duration"]
+    return np.array(
+        [(event[i], duration[i]) for i in range(y.shape[0])],
+        dtype=[("e", bool), ("t", float)],
+    )
+
+
+def get_c_index(y_train, y_test, y_pred, time_grid):
+    from sksurv.metrics import concordance_index_ipcw
+
+    et_train = make_recarray(y_train)
+    et_test = make_recarray(y_test)
+
+    c_indexes = []
+    for time_idx in [4, 9, 14]:
+        y_pred_at_t = y_pred[:, time_idx]
+        tau = time_grid[time_idx]
+        print(y_pred_at_t.shape, y_train.shape, y_test.shape)
+        ct_index, _, _, _, _ = concordance_index_ipcw(
+            et_train,
+            et_test,
+            y_pred_at_t,
+            tau=tau,
+        )
+        c_indexes.append(round(ct_index, 3))
+    
+    return c_indexes

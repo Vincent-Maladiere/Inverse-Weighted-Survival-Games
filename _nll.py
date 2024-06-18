@@ -42,7 +42,7 @@ def nll_batch(tgt, dist, args, is_g):
 def nll(phase, loader, model, optimizer=None, args=None, is_g=False):
     loss_meter = util.Meter()                        
     for batch_idx, batch in enumerate(loader):
-        (U,Delta,X) = batch
+        (U,_,Delta,X) = batch
         U = U.to(args.device)
         Delta = Delta.to(args.device)
         X = X.to(args.device)

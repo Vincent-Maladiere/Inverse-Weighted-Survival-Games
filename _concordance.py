@@ -20,7 +20,7 @@ def concordance(loader,model,args,is_g=False):
     all_U = []                                                                            
     all_Delta = []                                                                        
     all_pred_time = []                                                                    
-    for idx, (U,Delta,X) in enumerate(loader):
+    for idx, (U,_,Delta,X) in enumerate(loader):
         U=U.to(args.device)
         Delta=Delta.to(args.device)
         X=X.to(args.device)    

@@ -224,16 +224,18 @@ def make_gamma_loaders(args):
 
 
 class SyntheticDataset(torch.utils.data.Dataset):
-    def __init__(self, U, Delta, X):
+    def __init__(self, U, cU, Delta, X):
         self.X=X
         self.U=U
+        self.cU = cU
         self.Delta=Delta
 
     def __getitem__(self, index):
         u=self.U[index]
+        cu=self.cU[index]
         delta=self.Delta[index]
         x=self.X[index]
-        return u,delta,x
+        return u,cu,delta,x
 
     def __len__(self):
         return len(self.U)
@@ -249,7 +251,7 @@ def make_real_loaders(args, mode='normal'):
     return trainloader,valloader,testloader
 
 
-def tensors_to_dataset(X, U, Delta, phase, args):
+def tensors_to_dataset(X, U, cU, Delta, phase, args):
     N_full = X.shape[0]
     if phase == 'train':
         N = args.N_train
@@ -258,7 +260,7 @@ def tensors_to_dataset(X, U, Delta, phase, args):
     X = X.float()
     U = U.long()
     Delta = Delta.bool()
-    dataset = SyntheticDataset(U=U[:N], Delta=Delta[:N], X=X[:N])
+    dataset = SyntheticDataset(U=U[:N], cU=cU[:N], Delta=Delta[:N], X=X[:N])
     return dataset
 
 def file_to_dataset(fname, args):
@@ -307,12 +309,14 @@ def file_to_dataset(fname, args):
         assert time_cat.shape == original_shape
         return time_cat
 
+    u_continuous = u.clone().detach()
     u = get_bin(u, boundaries)
     print("delta=1: {}/{}".format(delta.sum(), delta.shape[0]))
 
     N = u.shape[0]
     p = np.random.permutation(N)
     u = u[p]
+    u_continuous = u_continuous[p]
     delta = delta[p]
     x = x[p]
 
@@ -325,6 +329,10 @@ def file_to_dataset(fname, args):
     utr = u[:TRAIN_SPLIT]
     uva = u[TRAIN_SPLIT:VAL_SPLIT]
     ute = u[VAL_SPLIT:]
+
+    uctr = u_continuous[:TRAIN_SPLIT]
+    ucva = u_continuous[TRAIN_SPLIT:VAL_SPLIT]
+    ucte = u_continuous[VAL_SPLIT:]
 
     deltatr = delta[:TRAIN_SPLIT]
     deltava = delta[TRAIN_SPLIT:VAL_SPLIT]
@@ -343,8 +351,8 @@ def file_to_dataset(fname, args):
     xtr = standardize(xtr, mu_tr, std_tr)
     xva = standardize(xva, mu_tr, std_tr)
     xte = standardize(xte, mu_tr, std_tr)
-    trainset = tensors_to_dataset(xtr, utr, deltatr, 'train', args)
-    valset = tensors_to_dataset(xva, uva, deltava, 'val', args)
-    testset = tensors_to_dataset(xte, ute, deltate, 'test', args)
+    trainset = tensors_to_dataset(xtr, utr, uctr, deltatr, 'train', args)
+    valset = tensors_to_dataset(xva, uva, ucva, deltava, 'val', args)
+    testset = tensors_to_dataset(xte, ute, ucte, deltate, 'test', args)
     return trainset, valset, testset
 
