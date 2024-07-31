@@ -13,6 +13,7 @@ import _concordance
 import _nll
 import _km
 
+
 def str_to_bool(arg):
     """Convert an argument string into its boolean value.
     Args:
@@ -273,25 +274,57 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
     fnll,_ = _nll.nll_FG('test',testloader,Fmodel,Gmodel,args)         
     fconc,_ = _concordance.test_concordance_FG(testloader,testloader,Fmodel,Gmodel,args)
     
-    y_train, y_test, y_pred, time_grid = get_targets(trainloader, testloader, Fmodel, args)
+    y_train, y_test, y_pred, time_grid, n_features = get_targets(trainloader, testloader, Fmodel, args)
 
-    yana_loss = get_yana_loss(
-        pred=y_pred,
-        duration=y_test["duration"],
-        event=y_test["event"],
-        time_grid=time_grid,
+    ### Start of hazardous code snippet ###
+    from hazardous.metrics._yana import CensoredNegativeLogLikelihoodSimple
+
+    y_pred = y_pred[None, :, :]
+    y_surv = 1 - y_pred
+    y_pred = np.concatenate([y_surv, y_pred], axis=0)
+
+    censlog = CensoredNegativeLogLikelihoodSimple().loss(
+        y_pred, y_test["duration"], y_test["event"], time_grid
     )
 
     from hazardous.metrics._brier_score import integrated_brier_score_incidence
-    hazardous_ibs = integrated_brier_score_incidence(
+    from hazardous.metrics._brier_score import brier_score_incidence
+
+    event_id = 1
+
+    ibs = integrated_brier_score_incidence(
         y_train,
         y_test,
-        y_pred,
+        y_pred[event_id],
         times=time_grid,
         event_of_interest="any",
     )
+    brier_scores = brier_score_incidence(
+        y_train,
+        y_test,
+        y_pred[event_id],
+        times=time_grid,
+        event_of_interest="any",
+    )
+    event_specific_ibs = [{
+        "event": event_id,
+        "ibs": round(ibs, 4),
+    }]
+    event_specific_brier_scores = [{
+        "event": event_id,
+        "time": list(time_grid.round(2)),
+        "brier_score": list(brier_scores.round(4)),
+    }]
 
-    c_indexes = get_c_index(y_train, y_test, y_pred, time_grid)
+    horizons = [.25, .50, .75]
+    c_indices = get_c_index(y_train, y_test, y_pred[event_id], time_grid, horizons)
+    event_specific_c_index = [
+        {
+            "event": event_id,
+            "time_quantile": horizons,
+            "c_index": c_indices,
+        }
+    ]
 
     if args.dataset in ['gamma','mnist']:
         assert torch.all(torch.eq(Ftestloader.dataset.Delta,1))
@@ -311,12 +344,43 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
     metrics['fbll_ipcw']=round3(fbll_ipcw)  
     metrics['fbs_uncensored']=round3(fbs_uncensored)
     metrics['fbll_uncensored']=round3(fbll_uncensored)
-    metrics["yana_loss"] = yana_loss
-    metrics["hazardous_ibs"] = hazardous_ibs
-    metrics["c_indexes"] = c_indexes
 
-    print(metrics)
-    import ipdb; ipdb.set_trace()    
+    import json
+    from pathlib import Path
+
+    model_name = f"han-{args.loss_fn}"
+    scores = {
+        "is_competing_risk": False,
+        "n_events": 1,
+        "model_name": model_name,
+        "dataset_name": args.dataset,
+        "n_rows": y_train.shape[0],
+        "n_cols": n_features,
+        "censoring_rate": y_train["event"].mean().round(4),
+        "random_state": args.random_state,
+        "time_grid": np.asarray(time_grid, dtype="float32").tolist(),
+        "y_pred": np.asarray(y_pred, dtype="float32").tolist(),
+        "predict_time": None,
+        "event_specific_ibs": event_specific_ibs,
+        "event_specific_brier_scores": event_specific_brier_scores,
+        "event_specific_c_index": event_specific_c_index,
+        "censlog": censlog,
+        "fit_time": args.fit_time,
+    }
+
+    path_dir = Path("../benchmark/scores") / "raw" / model_name
+    path_dir.mkdir(parents=True, exist_ok=True)
+    path_file = path_dir /  f"{args.dataset}.json"
+
+    if path_file.exists():
+        all_scores = json.load(open(path_file))
+    else:
+        all_scores = []
+    
+    all_scores.append(scores)
+    json.dump(all_scores, open(path_file, "w"))
+
+    ### End of hazardous code snippet
 
     return metrics
 
@@ -347,9 +411,9 @@ def eval_game(loaders,args, tic):
     best_G = get_model_from_file(cur_G_file,args)
     import time
     toc = time.time()
+    args.fit_time = toc - tic
     print(f"time to train: {toc - tic:.2f} seconds")
-    return
-    return f_metrics(loaders,best_F,best_G,args), cur_F_file,cur_G_file
+    return f_metrics(loaders,best_F,best_G,args), cur_F_file, cur_G_file
 
 
 def get_bin_boundaries(times, K):
@@ -412,22 +476,7 @@ def get_targets(trainloader, testloader, model, args):
 
     time_grid = get_bin_boundaries(all_duration[all_event], args.K)
 
-    return y_train, y_test, risk, time_grid
-
-
-def get_yana_loss(pred, duration, event, time_grid, epsilon=1e-5):
-    loss = 0
-    for idx_time in range(len(time_grid) - 1):
-        lower_time = time_grid[idx_time]
-        upper_time = time_grid[idx_time + 1]
-        mask = (lower_time < duration) & (duration <= upper_time)
-        mask = mask.values
-        f = pred[:, idx_time + 1] - pred[:, idx_time]
-        loss -= (event * np.log(f + epsilon))[mask].sum()
-        loss -= ((1 - event) * np.log(1 - pred[:, idx_time + 1] + epsilon))[
-            mask
-        ].sum()
-    return loss / pred.shape[0]
+    return y_train, y_test, risk, time_grid, X.shape[1]
 
 
 def make_recarray(y):
@@ -439,16 +488,19 @@ def make_recarray(y):
     )
 
 
-def get_c_index(y_train, y_test, y_pred, time_grid):
+def get_c_index(y_train, y_test, y_pred, time_grid, horizons):
     from sksurv.metrics import concordance_index_ipcw
 
     et_train = make_recarray(y_train)
     et_test = make_recarray(y_test)
+    
+    taus = np.quantile(time_grid, horizons)
 
     c_indexes = []
-    for time_idx in [4, 9, 14]:
-        y_pred_at_t = y_pred[:, time_idx]
-        tau = time_grid[time_idx]
+    for tau in taus:
+        idx_tau = np.searchsorted(time_grid, tau)
+        y_pred_at_t = y_pred[:, idx_tau]
+        
         print(y_pred_at_t.shape, y_train.shape, y_test.shape)
         ct_index, _, _, _, _ = concordance_index_ipcw(
             et_train,

@@ -315,6 +315,14 @@ def file_to_dataset(fname, args):
 
     N = u.shape[0]
     p = np.random.permutation(N)
+
+    ### hazardous code snippet
+    from sklearn.utils import check_random_state
+
+    rng = check_random_state(args.random_state)
+    p = rng.permutation(N)
+    ###
+
     u = u[p]
     u_continuous = u_continuous[p]
     delta = delta[p]

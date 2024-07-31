@@ -42,6 +42,7 @@ parser.add_argument('--logeps',type=float,default=1e-4)
 parser.add_argument('--ckpt_basename',type=str,default='tmp')
 parser.add_argument('--m',type=int,default=1)
 parser.add_argument('--kminusone',type=int,default=0)
+parser.add_argument('--random_state',type=int,default=0)
 args = parser.parse_args()
 print(args)
 
@@ -171,7 +172,6 @@ def main():
             Gmodel = Gsaver.load_best().to(args.device)
             Fmodel.eval()
             Gmodel.eval()
-
             ret = util.eval_nll(loaders,Fmodel,Gmodel,args)
         else:
             ret,bestF,bestG = util.eval_game(loaders,args, tic)
