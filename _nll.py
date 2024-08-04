@@ -41,7 +41,8 @@ def nll_batch(tgt, dist, args, is_g):
 # conditional
 def nll(phase, loader, model, optimizer=None, args=None, is_g=False):
     loss_meter = util.Meter()                        
-    for batch_idx, batch in enumerate(loader):
+    from tqdm import tqdm
+    for batch_idx, batch in tqdm(enumerate(loader)):
         (U,_,Delta,X) = batch
         U = U.to(args.device)
         Delta = Delta.to(args.device)

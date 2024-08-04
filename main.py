@@ -59,7 +59,7 @@ def main():
     dt_string = now.strftime("%d/%m/%Y %H:%M:%S")
     print("date and time =", dt_string)
 
-    args.realsets = ['metabric','support','gbsg','flchain','nwtco','gbm','gbmlgg','nacd','nacdcol','brca','read']
+    args.realsets = ['kkbox', 'metabric','support','gbsg','flchain','nwtco','gbm','gbmlgg','nacd','nacdcol','brca','read']
     args.game_losses = ['bs_game','bll_game']
 
     # catch nans
@@ -164,6 +164,7 @@ def main():
             Gsaver.always_save(epoch, Gmodel)
     #end train
     # start test
+    args.fit_time = time.time() - tic
 
     with torch.no_grad():
 

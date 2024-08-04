@@ -2,9 +2,11 @@
 
 This repo contains the code for paper Inverse Weighted Survival Games
 
-# instructionsF
+# instructions
 
-python main.py --dataset support --random_state 3 --loss_fn bll_game
+```shell
+python main.py --dataset {kkbox, metabric, support} --random_state 0 --loss_fn {nll, bll_game, bs_game} --N_train 1024 --N_val 4096 --N_test 4096
+```
 
 ## general
 - loss function (--lfn) can be in ['nll','bs_game','bll_game']

@@ -255,8 +255,11 @@ def tensors_to_dataset(X, U, cU, Delta, phase, args):
     N_full = X.shape[0]
     if phase == 'train':
         N = args.N_train
-    elif phase in ['val', 'test']:
-        N = N_full
+    elif phase == 'val':
+        N = args.N_val
+    elif phase == 'test':
+        N = args.N_test
+
     X = X.float()
     U = U.long()
     Delta = Delta.bool()
@@ -265,15 +268,31 @@ def tensors_to_dataset(X, U, cU, Delta, phase, args):
 
 def file_to_dataset(fname, args):
     K = args.K
-    print("fname", fname)
-    df = pd.read_csv(fname)
-
-    cols_to_drop = [c for c in df.columns if 'Unnamed' in c]
-    df = df.drop(columns=cols_to_drop)
+    if args.dataset == "kkbox":
+        from pycox.datasets import kkbox
+        df = kkbox.read_df()
+    else:
+        print("fname", fname)
+        df = pd.read_csv(fname)
+        cols_to_drop = [c for c in df.columns if 'Unnamed' in c]
+        df = df.drop(columns=cols_to_drop)
 
     df_u = df['duration']
     df_delta = df['event']
     df_x = df.drop(columns=['duration', 'event'])
+    if args.dataset == "kkbox":
+        df_x = df_x.drop(columns=['censor_duration', 'msno'])
+
+        from hazardous.survtrace._encoder import SurvFeatureEncoder
+        
+        categorical_columns = ["city", "gender", "registered_via", "payment_method_id"]
+        numerical_columns = list(set(df_x.columns) - set(categorical_columns))
+
+        df_x = SurvFeatureEncoder(
+            categorical_columns=categorical_columns,
+            numeric_columns=numerical_columns,
+        ).fit_transform(df_x)
+
     print("x columns", df_x.columns)
     print(df_u.shape)
     print(df_delta.shape)
@@ -359,6 +378,7 @@ def file_to_dataset(fname, args):
     xtr = standardize(xtr, mu_tr, std_tr)
     xva = standardize(xva, mu_tr, std_tr)
     xte = standardize(xte, mu_tr, std_tr)
+
     trainset = tensors_to_dataset(xtr, utr, uctr, deltatr, 'train', args)
     valset = tensors_to_dataset(xva, uva, ucva, deltava, 'val', args)
     testset = tensors_to_dataset(xte, ute, ucte, deltate, 'test', args)
