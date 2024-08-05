@@ -14,6 +14,7 @@ import _nll
 import _km
 
 
+
 def str_to_bool(arg):
     """Convert an argument string into its boolean value.
     Args:
@@ -317,7 +318,7 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
     }]
 
     horizons = [.25, .50, .75]
-    c_indices = get_c_index(y_train, y_test, y_pred[event_id], time_grid, horizons)
+    c_indices = get_c_index(y_train, y_test, y_pred[event_id], time_grid, horizons, args)
     event_specific_c_index = [
         {
             "event": event_id,
@@ -379,6 +380,7 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
     
     all_scores.append(scores)
     json.dump(all_scores, open(path_file, "w"))
+    print(f"Wrote {path_file}")
 
     ### End of hazardous code snippet
 
@@ -480,24 +482,39 @@ def get_targets(trainloader, testloader, model, args):
 
 
 def make_recarray(y):
-    event = y["event"]
-    duration = y["duration"]
+    event = y["event"].to_numpy()
+    duration = y["duration"].to_numpy()
     return np.array(
         [(event[i], duration[i]) for i in range(y.shape[0])],
         dtype=[("e", bool), ("t", float)],
     )
 
 
-def get_c_index(y_train, y_test, y_pred, time_grid, horizons):
+def get_c_index(y_train, y_test, y_pred, time_grid, horizons, args):
+
     from sksurv.metrics import concordance_index_ipcw
+
+    taus = np.quantile(time_grid, horizons)
+
+    if args.N_test_c_index is not None:
+        from sklearn.model_selection import train_test_split
+
+        y_test = y_test.reset_index(drop=True)
+        y_test, _ = train_test_split(
+            y_test,
+            stratify=y_test["event"],
+            train_size=args.N_test_c_index,
+            shuffle=True,
+            random_state=args.random_state,
+        )
+        y_pred = y_pred[y_test.index, :]
 
     et_train = make_recarray(y_train)
     et_test = make_recarray(y_test)
-    
-    taus = np.quantile(time_grid, horizons)
 
     c_indexes = []
-    for tau in taus:
+    from tqdm import tqdm
+    for tau in tqdm(taus, desc="computing c-index"):
         idx_tau = np.searchsorted(time_grid, tau)
         y_pred_at_t = y_pred[:, idx_tau]
         
