@@ -340,7 +340,7 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
     )
     mse = evaluator.mse(method="Pseudo_obs")
     mae = evaluator.mae(method="Pseudo_obs")
-    d_calibration, _ = evaluator.d_calibration(num_bins=10) 
+    auc = evaluator.auc() 
 
     if args.dataset in ['gamma','mnist']:
         assert torch.all(torch.eq(Ftestloader.dataset.Delta,1))
@@ -383,7 +383,7 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
         "censlog": censlog,
         "mse": mse,
         "mae": mae,
-        "d_calibration": d_calibration,
+        "auc": auc,
         "fit_time": args.fit_time,
     }
 
