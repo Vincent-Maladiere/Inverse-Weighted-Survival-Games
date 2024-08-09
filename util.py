@@ -327,6 +327,21 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
         }
     ]
 
+    # MSE, MAE, D-Calibration
+    from SurvivalEVAL import SurvivalEvaluator
+
+    evaluator = SurvivalEvaluator(
+        predicted_survival_curves=y_pred[0, :, :],
+        time_coordinates=time_grid,
+        test_event_indicators=y_test["event"].to_numpy(),
+        test_event_times=y_test["duration"].to_numpy(),
+        train_event_indicators=y_train["event"].to_numpy(),
+        train_event_times=y_train["duration"].to_numpy(),
+    )
+    mse = evaluator.mse(method="Pseudo_obs")
+    mae = evaluator.mae(method="Pseudo_obs")
+    d_calibration, _ = evaluator.d_calibration(num_bins=10) 
+
     if args.dataset in ['gamma','mnist']:
         assert torch.all(torch.eq(Ftestloader.dataset.Delta,1))
         fbs_uncensored,_ = game('bs_game','test',Ftestloader,Fmodel,Gmodel,args,mode='uncensored')
@@ -366,6 +381,9 @@ def f_metrics(loaders,Fmodel,Gmodel,args):
         "event_specific_brier_scores": event_specific_brier_scores,
         "event_specific_c_index": event_specific_c_index,
         "censlog": censlog,
+        "mse": mse,
+        "mae": mae,
+        "d_calibration": d_calibration,
         "fit_time": args.fit_time,
     }
 
